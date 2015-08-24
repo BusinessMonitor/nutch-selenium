@@ -47,19 +47,17 @@ public class HttpResponse implements Response {
         this.base = url.toString();
 
         FirefoxDriver driver = new FirefoxDriver();
-//            }            WebDriver driver = threadWebDriver.get();
-//            if (driver == null) {
-//                driver = new FirefoxDriver();
-//            }
+        try {
+            driver.get(url.toString());
+            // Wait for the page to load, timeout after 3 seconds
+            new WebDriverWait(driver, 3);
 
-        driver.get(url.toString());
-
-        // Wait for the page to load, timeout after 3 seconds
-        new WebDriverWait(driver, 3);
-
-        String innerHtml = driver.findElement(By.tagName("body")).getAttribute("innerHTML");
-        code = 200;
-        content = innerHtml.getBytes("UTF-8");
+            String innerHtml = driver.findElement(By.tagName("body")).getAttribute("innerHTML");
+            code = 200;
+            content = innerHtml.getBytes("UTF-8");
+        } finally {
+            driver.close();
+        }
     }
 
     public URL getUrl() {
