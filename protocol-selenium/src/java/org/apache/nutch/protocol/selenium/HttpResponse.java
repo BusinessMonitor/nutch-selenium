@@ -1,33 +1,22 @@
 package org.apache.nutch.protocol.selenium;
 
 // JDK imports
-import java.io.BufferedInputStream;
-import java.io.EOFException;
-import java.io.IOException;
-import java.io.OutputStream;
-import java.io.PushbackInputStream;
-import java.net.InetSocketAddress;
-import java.net.Socket;
-import java.net.URL;
 
-import org.apache.commons.lang.StringUtils;
 import org.apache.hadoop.conf.Configuration;
-// import org.apache.nutch.crawl.CrawlDatum;
-import org.apache.nutch.storage.WebPage;
 import org.apache.nutch.metadata.Metadata;
 import org.apache.nutch.metadata.SpellCheckedMetadata;
 import org.apache.nutch.net.protocols.HttpDateFormat;
 import org.apache.nutch.net.protocols.Response;
 import org.apache.nutch.protocol.ProtocolException;
-import org.apache.nutch.protocol.http.api.HttpBase;
 import org.apache.nutch.protocol.http.api.HttpException;
+import org.apache.nutch.storage.WebPage;
 
-import org.openqa.selenium.By;
-import org.openqa.selenium.WebDriver;
-import org.openqa.selenium.WebElement;
-import org.openqa.selenium.firefox.FirefoxDriver;
-import org.openqa.selenium.support.ui.ExpectedCondition;
-import org.openqa.selenium.support.ui.WebDriverWait;
+import java.io.*;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.net.URL;
+
+// import org.apache.nutch.crawl.CrawlDatum;
 
 /* Most of this code was borrowed from protocol-htmlunit; which in turn borrowed it from protocol-httpclient */
 
@@ -40,10 +29,12 @@ public class HttpResponse implements Response {
     private byte[] content;
     private int code;
     private Metadata headers = new SpellCheckedMetadata();
-    
-    /** The nutch configuration */
+
+    /**
+     * The nutch configuration
+     */
     private Configuration conf = null;
-    
+
     public HttpResponse(Http http, URL url, WebPage page, Configuration conf) throws ProtocolException, IOException {
 
         this.conf = conf;
@@ -52,8 +43,11 @@ public class HttpResponse implements Response {
         this.orig = url.toString();
         this.base = url.toString();
 
-        if (!"http".equals(url.getProtocol()))
+        String protocol = url.getProtocol();
+
+        if (!"http".equals(protocol) || !"https".equals(protocol))
             throw new HttpException("Not an HTTP url:" + url);
+        else protocol = url.getProtocol();
 
         if (Http.LOG.isTraceEnabled()) {
             Http.LOG.trace("fetching " + url);
@@ -69,7 +63,13 @@ public class HttpResponse implements Response {
         int port;
         String portString;
         if (url.getPort() == -1) {
-            port = 80;
+            if (protocol.equals("http")) {
+                port = 80;
+            } else if(protocol.equals("https")) {
+                port = 443;
+            } else {
+                throw new HttpException("Invalid protocol:" + protocol);
+            }
             portString = "";
         } else {
             port = url.getPort();
@@ -137,8 +137,8 @@ public class HttpResponse implements Response {
             req.flush();
 
             PushbackInputStream in = // process response
-            new PushbackInputStream(new BufferedInputStream(socket.getInputStream(), Http.BUFFER_SIZE),
-                    Http.BUFFER_SIZE);
+                    new PushbackInputStream(new BufferedInputStream(socket.getInputStream(), Http.BUFFER_SIZE),
+                            Http.BUFFER_SIZE);
 
             StringBuffer line = new StringBuffer();
 
@@ -165,6 +165,41 @@ public class HttpResponse implements Response {
      * <implementation:Response> *
      * ------------------------- */
 
+    private static int readLine(PushbackInputStream in, StringBuffer line, boolean allowContinuedLine)
+            throws IOException {
+        line.setLength(0);
+        for (int c = in.read(); c != -1; c = in.read()) {
+            switch (c) {
+                case '\r':
+                    if (peek(in) == '\n') {
+                        in.read();
+                    }
+                case '\n':
+                    if (line.length() > 0) {
+                        // at EOL -- check for continued line if the current
+                        // (possibly continued) line wasn't blank
+                        if (allowContinuedLine)
+                            switch (peek(in)) {
+                                case ' ':
+                                case '\t': // line is continued
+                                    in.read();
+                                    continue;
+                            }
+                    }
+                    return line.length(); // else complete
+                default:
+                    line.append((char) c);
+            }
+        }
+        throw new EOFException();
+    }
+
+    private static int peek(PushbackInputStream in) throws IOException {
+        int value = in.read();
+        in.unread(value);
+        return value;
+    }
+
     public URL getUrl() {
         return url;
     }
@@ -177,6 +212,10 @@ public class HttpResponse implements Response {
         return headers.get(name);
     }
 
+    /* ------------------------- *
+     * <implementation:Response> *
+     * ------------------------- */
+
     public Metadata getHeaders() {
         return headers;
     }
@@ -184,10 +223,6 @@ public class HttpResponse implements Response {
     public byte[] getContent() {
         return content;
     }
-
-    /* ------------------------- *
-     * <implementation:Response> *
-     * ------------------------- */
 
     private void readPlainContent(URL url) throws IOException {
         String page = HttpWebClient.getHtmlPage(url.toString(), conf);
@@ -270,40 +305,5 @@ public class HttpResponse implements Response {
 
             processHeaderLine(line);
         }
-    }
-
-    private static int readLine(PushbackInputStream in, StringBuffer line, boolean allowContinuedLine)
-            throws IOException {
-        line.setLength(0);
-        for (int c = in.read(); c != -1; c = in.read()) {
-            switch (c) {
-            case '\r':
-                if (peek(in) == '\n') {
-                    in.read();
-                }
-            case '\n':
-                if (line.length() > 0) {
-                    // at EOL -- check for continued line if the current
-                    // (possibly continued) line wasn't blank
-                    if (allowContinuedLine)
-                        switch (peek(in)) {
-                        case ' ':
-                        case '\t': // line is continued
-                            in.read();
-                            continue;
-                        }
-                }
-                return line.length(); // else complete
-            default:
-                line.append((char) c);
-            }
-        }
-        throw new EOFException();
-    }
-
-    private static int peek(PushbackInputStream in) throws IOException {
-        int value = in.read();
-        in.unread(value);
-        return value;
     }
 }
